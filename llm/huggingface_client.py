@@ -22,7 +22,7 @@ class HuggingFaceExplainer:
         
         device = 0 if torch.cuda.is_available() else -1
         self.generator = pipeline(
-            "text2text-generation",
+            "text-generation",
             model=model_name,
             device=device,
             max_length=512

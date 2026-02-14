@@ -85,13 +85,13 @@ class IDSPipeline:
         print(f"  Features: {self.data['num_features']}")
         print(f"  Classes: {self.data['num_classes']}")
     
-    def train_or_load_model(self, force_retrain=False, epochs=1, batch_size=128):
+    def train_or_load_model(self, force_retrain=False, epochs=5, batch_size=128):
         """
         Train a new model or load existing one.
         
         Args:
             force_retrain: If True, train new model even if one exists
-            epochs: Training epochs (default: 1 for quick training)
+            epochs: Training epochs (default: 5 for production quality)
             batch_size: Batch size for training
         """
         print("\n[STEP 2/6] Deep Learning Model")
@@ -190,7 +190,7 @@ class IDSPipeline:
         print("\n[STEP 6/6] Initializing Decision Agent")
         print("-" * 70)
         
-        self.decision_agent = create_decision_agent(use_llm_reasoning=False)
+        self.decision_agent = create_decision_agent()
         
         print(f"\n✓ Decision agent initialized")
     
