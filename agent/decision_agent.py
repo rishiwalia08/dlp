@@ -1,75 +1,26 @@
 """
 Decision Agent for autonomous action execution.
 
-This module:
-- Implements a SINGLE decision agent at the END of the pipeline
-- Agent does NOT predict attacks
-- Agent does NOT retrain models
-- Agent ONLY automates actions based on system outputs
+This module implements rule-based decision logic for IDS responses.
+No LLM dependencies - pure Python logic.
 """
-
-from langchain_community.llms import Ollama
-from langchain_core.prompts import PromptTemplate
 
 
 class DecisionAgent:
     """
     Autonomous decision agent for IDS response actions.
     
-    The agent uses rule-based logic to determine actions based on:
+    Uses rule-based logic based on:
     - Attack type
     - Confidence
     - Risk score
-    - LLM explanation
+    - Severity
     """
     
-    def __init__(self, use_llm_reasoning=False, llm_model="llama3.2"):
-        """
-        Initialize decision agent.
-        
-        Args:
-            use_llm_reasoning: If True, use LLM for decision rationale (optional)
-            llm_model: Ollama model for reasoning (if enabled)
-        """
-        self.use_llm_reasoning = use_llm_reasoning
-        self.llm_model = llm_model
-        self.llm_chain = None
-        
-        print("\n=== Initializing Decision Agent ===")
-        print(f"LLM reasoning: {'Enabled' if use_llm_reasoning else 'Disabled (Rule-based only)'}")
-        
-        if use_llm_reasoning:
-            self._init_llm_reasoning()
-    
-    def _init_llm_reasoning(self):
-        """Initialize LLM chain for decision rationale (optional enhancement)."""
-        try:
-            llm = Ollama(model=self.llm_model, temperature=0.2)
-            
-            prompt_template = """You are a security operations assistant.
-
-Given the following intrusion detection results:
-- Attack Type: {attack_type}
-- Confidence: {confidence:.2%}
-- Risk Score: {risk_score:.4f}
-- Severity: {severity}
-- Recommended Action: {action}
-
-Provide a brief (2-3 sentences) rationale for why this action is appropriate."""
-            
-            prompt = PromptTemplate(
-                template=prompt_template,
-                input_variables=["attack_type", "confidence", "risk_score", "severity", "action"]
-            )
-            
-            # Create chain using modern pipe operator
-            self.llm_chain = prompt | llm
-            print("LLM reasoning chain initialized")
-        
-        except Exception as e:
-            print(f"Warning: Could not initialize LLM reasoning: {e}")
-            print("Falling back to rule-based only")
-            self.use_llm_reasoning = False
+    def __init__(self):
+        """Initialize decision agent with rule-based logic only."""
+        print("\\n=== Initializing Decision Agent ===")
+        print("Using rule-based decision logic")
     
     def decide_action(self, attack_type, confidence, risk_score, severity, llm_explanation=None):
         """
@@ -115,25 +66,10 @@ Provide a brief (2-3 sentences) rationale for why this action is appropriate."""
         # Execute simulated action
         execution_log = self._execute_action(action_type, attack_type, risk_score)
         
-        # Generate decision rationale
-        if self.use_llm_reasoning and self.llm_chain:
-            try:
-                rationale = self.llm_chain.invoke({
-                    "attack_type": attack_type,
-                    "confidence": confidence,
-                    "risk_score": risk_score,
-                    "severity": severity,
-                    "action": action
-                })
-            except:
-                rationale = details
-        else:
-            rationale = details
-        
         decision = {
             'action': action,
             'action_type': action_type,
-            'rationale': rationale,
+            'rationale': details,
             'execution_log': execution_log,
             'attack_type': attack_type,
             'confidence': confidence,
@@ -191,7 +127,7 @@ Provide a brief (2-3 sentences) rationale for why this action is appropriate."""
         Returns:
             list: List of decision dictionaries
         """
-        print(f"\nMaking decisions for {len(predictions_data)} predictions...")
+        print(f"\\nMaking decisions for {len(predictions_data)} predictions...")
         
         decisions = []
         for i, pred_data in enumerate(predictions_data):
@@ -217,40 +153,37 @@ Provide a brief (2-3 sentences) rationale for why this action is appropriate."""
         Args:
             decision: Decision dictionary
         """
-        print("\n" + "="*60)
+        print("\\n" + "="*60)
         print("DECISION AGENT OUTPUT")
         print("="*60)
         print(f"Attack Type: {decision['attack_type']}")
         print(f"Confidence: {decision['confidence']:.2%}")
         print(f"Risk Score: {decision['risk_score']:.4f}")
         print(f"Severity: {decision['severity']}")
-        print(f"\nAction: {decision['action']}")
+        print(f"\\nAction: {decision['action']}")
         print(f"Action Type: {decision['action_type']}")
-        print(f"\nRationale: {decision['rationale']}")
-        print("\nExecution Log:")
+        print(f"\\nRationale: {decision['rationale']}")
+        print("\\nExecution Log:")
         for log_entry in decision['execution_log']:
             print(f"  {log_entry}")
         print("="*60)
 
 
-def create_decision_agent(use_llm_reasoning=False):
+def create_decision_agent():
     """
-    Convenience function to create decision agent.
+    Create decision agent with rule-based logic.
     
-    Args:
-        use_llm_reasoning: Whether to use LLM for decision rationale
-        
     Returns:
         DecisionAgent instance
     """
-    return DecisionAgent(use_llm_reasoning=use_llm_reasoning)
+    return DecisionAgent()
 
 
 if __name__ == "__main__":
     # Test decision agent
     print("Testing Decision Agent...")
     
-    agent = create_decision_agent(use_llm_reasoning=False)
+    agent = create_decision_agent()
     
     # Test cases
     test_cases = [
@@ -280,7 +213,7 @@ if __name__ == "__main__":
         }
     ]
     
-    print("\n=== Testing Decision Logic ===")
+    print("\\n=== Testing Decision Logic ===")
     for test in test_cases:
         decision = agent.decide_action(**test)
         agent.print_decision_summary(decision)
