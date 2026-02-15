@@ -73,6 +73,9 @@ class SHAPExplainer:
             # Single array format
             class_shap_values = shap_values[0].squeeze()
         
+        # Ensure it's a 1D array
+        class_shap_values = np.atleast_1d(class_shap_values).flatten()
+        
         # Get absolute values for ranking importance
         abs_shap_values = np.abs(class_shap_values)
         
@@ -82,9 +85,11 @@ class SHAPExplainer:
         # Create explanation dictionary
         top_features = []
         for idx in top_indices:
+            # Ensure idx is a scalar integer
+            idx = int(idx)
             top_features.append({
                 'feature_name': self.feature_names[idx],
-                'feature_index': int(idx),
+                'feature_index': idx,
                 'shap_value': float(class_shap_values[idx]),
                 'abs_shap_value': float(abs_shap_values[idx])
             })
