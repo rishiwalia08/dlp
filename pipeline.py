@@ -40,7 +40,7 @@ class IDSPipeline:
     """
     
     def __init__(self, model_path='saved_models/ids_cnn.keras', 
-                 use_llm=True, llm_model='distilgpt2'):
+                 use_llm=False, llm_model='distilgpt2'):
         """
         Initialize the pipeline.
         
@@ -357,7 +357,7 @@ def main():
     parser.add_argument('--samples', type=int, default=5, help='Number of samples to process')
     parser.add_argument('--retrain', action='store_true', help='Force model retraining')
     parser.add_argument('--no-llm', action='store_true', help='Disable HuggingFace LLM')
-    parser.add_argument('--llm-model', type=str, default='google/flan-t5-base', help='HuggingFace model name')
+    parser.add_argument('--llm-model', type=str, default='distilgpt2', help='HuggingFace model name')
     
     args = parser.parse_args()
     
