@@ -1,6 +1,6 @@
 """
 HuggingFace LLM client for IDS explanations.
-Replaces Ollama for cloud/Colab deployment.
+Uses DistilGPT-2 - small model that fits in Colab GPU.
 """
 
 from transformers import pipeline
@@ -10,12 +10,12 @@ import torch
 class HuggingFaceExplainer:
     """LLM explainer using HuggingFace models."""
     
-    def __init__(self, model_name="google/flan-t5-base", temperature=0.3):
+    def __init__(self, model_name="distilgpt2", temperature=0.7):
         """
         Initialize HuggingFace LLM.
         
         Args:
-            model_name: HuggingFace model name
+            model_name: HuggingFace model name (default: distilgpt2 - 82MB)
             temperature: Sampling temperature
         """
         print(f"\nLoading HuggingFace model: {model_name}...")
@@ -25,85 +25,95 @@ class HuggingFaceExplainer:
             "text-generation",
             model=model_name,
             device=device,
-            max_length=512
+            max_length=200,
+            pad_token_id=50256  # GPT-2 EOS token
         )
         self.temperature = temperature
-        device_name = 'GPU' if device == 0 else 'CPU'
+        
+        device_name = "GPU" if device == 0 else "CPU"
         print(f"✓ Model loaded on {device_name}")
     
-    def explain_prediction(self, attack_type, confidence, risk_score, severity, top_features):
+    def _build_prompt(self, attack_type, confidence, top_features, risk_score):
+        """Build prompt for LLM."""
+        features_str = ", ".join([f['feature_name'] for f in top_features[:3]])
+        
+        prompt = f"""Network Attack Analysis:
+Type: {attack_type}
+Confidence: {confidence:.1%}
+Risk Score: {risk_score:.1f}/10
+Key Indicators: {features_str}
+
+Explanation:"""
+        return prompt
+    
+    def explain_prediction(self, attack_type, confidence, top_features, risk_score):
         """
-        Generate explanation for a prediction.
+        Generate natural language explanation for a prediction.
         
         Args:
             attack_type: Predicted attack type
             confidence: Model confidence
+            top_features: Top contributing features from SHAP
             risk_score: Computed risk score
-            severity: Severity category
-            top_features: List of top SHAP features
             
         Returns:
-            dict: Explanation results
+            str: Natural language explanation
         """
-        # Create concise prompt
-        feature_str = ", ".join([f"{f['feature_name']}" for f in top_features[:3]])
-        
-        prompt = f"""Analyze this network intrusion detection:
-Attack Type: {attack_type}
-Confidence: {confidence:.1%}
-Risk Score: {risk_score:.2f}
-Severity: {severity}
-Key Features: {feature_str}
-
-Provide a brief security analysis and recommended action:"""
-        
-        # Generate explanation
-        result = self.generator(
-            prompt,
-            max_length=200,
-            do_sample=True,
-            temperature=self.temperature
-        )
-        
-        explanation = result[0]['generated_text']
-        
-        return {
-            'raw_explanation': explanation,
-            'attack_type': attack_type,
-            'confidence': confidence,
-            'risk_assessment': f"{severity} risk - {attack_type}"
-        }
+        try:
+            # Build prompt
+            prompt = self._build_prompt(attack_type, confidence, top_features, risk_score)
+            
+            # Generate explanation
+            result = self.generator(
+                prompt,
+                max_new_tokens=50,
+                temperature=self.temperature,
+                do_sample=True,
+                num_return_sequences=1,
+                pad_token_id=50256
+            )
+            
+            explanation = result[0]['generated_text']
+            
+            # Extract only the generated part (after prompt)
+            explanation = explanation.replace(prompt, '').strip()
+            
+            # Clean up
+            if not explanation:
+                explanation = f"Detected {attack_type} with {confidence:.0%} confidence based on {top_features[0]['feature_name']}."
+            
+            return explanation
+            
+        except Exception as e:
+            # Fallback if LLM fails
+            print(f"Warning: LLM generation failed ({str(e)[:50]}...), using fallback")
+            return f"Detected {attack_type} attack with {confidence:.1%} confidence. Risk: {risk_score:.1f}/10. Key indicators: {', '.join([f['feature_name'] for f in top_features[:3]])}"
     
-    def explain_risk(self, attack_type, risk_score, severity):
+    def explain_batch(self, predictions, shap_explanations, risk_scores):
         """
-        Generate risk-focused explanation.
+        Generate explanations for multiple predictions.
         
         Args:
-            attack_type: Attack type
-            risk_score: Risk score
-            severity: Severity level
+            predictions: List of (attack_type, confidence) tuples
+            shap_explanations: List of SHAP explanation dicts
+            risk_scores: List of risk scores
             
         Returns:
-            str: Risk explanation
+            list: List of explanation strings
         """
-        prompt = f"""Explain the security risk:
-Attack: {attack_type}
-Risk Score: {risk_score:.2f}/10
-Severity: {severity}
-
-Brief risk analysis:"""
+        explanations = []
+        for (attack_type, confidence), shap_exp, risk_score in zip(predictions, shap_explanations, risk_scores):
+            explanation = self.explain_prediction(
+                attack_type, confidence,
+                shap_exp['top_features'],
+                risk_score
+            )
+            explanations.append(explanation)
         
-        result = self.generator(
-            prompt,
-            max_length=150,
-            do_sample=True,
-            temperature=self.temperature
-        )
-        
-        return result[0]['generated_text']
+        return explanations
 
 
-def create_huggingface_explainer(model_name="google/flan-t5-base", temperature=0.3):
+def create_huggingface_explainer(model_name="distilgpt2", temperature=0.7):
     """
     Create HuggingFace explainer instance.
     
@@ -118,25 +128,4 @@ def create_huggingface_explainer(model_name="google/flan-t5-base", temperature=0
 
 
 if __name__ == "__main__":
-    # Test the explainer
-    print("Testing HuggingFace Explainer...")
-    explainer = create_huggingface_explainer()
-    
-    # Test explanation
-    test_features = [
-        {'feature_name': 'Flow Duration', 'shap_value': 0.5},
-        {'feature_name': 'Total Fwd Packets', 'shap_value': 0.3},
-        {'feature_name': 'Flow Bytes/s', 'shap_value': 0.2}
-    ]
-    
-    result = explainer.explain_prediction(
-        attack_type="SSH-Bruteforce",
-        confidence=0.95,
-        risk_score=8.5,
-        severity="CRITICAL",
-        top_features=test_features
-    )
-    
-    print("\n=== Test Result ===")
-    print(f"Explanation: {result['raw_explanation']}")
-    print("\n✓ Test complete")
+    print("HuggingFace explainer module loaded")

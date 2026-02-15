@@ -40,7 +40,7 @@ class IDSPipeline:
     """
     
     def __init__(self, model_path='saved_models/ids_cnn.keras', 
-                 use_llm=True, llm_model='google/flan-t5-base'):
+                 use_llm=True, llm_model='distilgpt2'):
         """
         Initialize the pipeline.
         
