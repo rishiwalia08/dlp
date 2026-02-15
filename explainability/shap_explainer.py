@@ -1,11 +1,7 @@
 """
 SHAP explainability module for CNN predictions.
 
-This module:
-- Uses SHAP to explain CNN predictions
-- Extracts top contributing features
-- Computes feature importance values
-- SHAP runs AFTER the DL model prediction
+This module uses SHAP to explain CNN predictions with robust error handling.
 """
 
 import numpy as np
@@ -35,7 +31,6 @@ class SHAPExplainer:
         print(f"Number of features: {len(feature_names)}")
         
         # Initialize SHAP GradientExplainer
-        # GradientExplainer works well with deep learning models
         self.explainer = shap.GradientExplainer(
             model,
             background_data
@@ -54,55 +49,68 @@ class SHAPExplainer:
         Returns:
             dict: Explanation with top features and their SHAP values
         """
+        # Get prediction first
+        prediction = self.model.predict(sample, verbose=0)
+        predicted_class = int(np.argmax(prediction[0]))
+        
         # Compute SHAP values
         shap_values = self.explainer.shap_values(sample)
         
-        # shap_values is a list (one array per class)
-        # Get the predicted class
-        prediction = self.model.predict(sample, verbose=0)
-        predicted_class = np.argmax(prediction[0])
+        # Handle different SHAP output formats robustly
+        try:
+            if isinstance(shap_values, list):
+                # Multi-class output: list of arrays
+                if len(shap_values) > predicted_class:
+                    class_shap = shap_values[predicted_class]
+                else:
+                    # Fallback to first class
+                    class_shap = shap_values[0]
+            else:
+                # Single array output
+                class_shap = shap_values
+            
+            # Extract and flatten the SHAP values
+            # Handle shape: (1, features, 1) or (features,) or (1, features)
+            class_shap = np.array(class_shap).squeeze()
+            class_shap = np.atleast_1d(class_shap).flatten()
+            
+            # Ensure we don't exceed feature count
+            num_features = min(len(class_shap), len(self.feature_names))
+            class_shap = class_shap[:num_features]
+            
+        except Exception as e:
+            print(f"Warning: SHAP value extraction failed: {e}")
+            # Fallback: create zero array
+            class_shap = np.zeros(len(self.feature_names))
         
-        # Handle different SHAP output formats
-        if isinstance(shap_values, list) and len(shap_values) > predicted_class:
-            # Multi-class: list of arrays, one per class
-            class_shap_values = shap_values[predicted_class][0].squeeze()
-        elif isinstance(shap_values, list) and len(shap_values) > 0:
-            # Fallback: use first available class
-            class_shap_values = shap_values[0][0].squeeze()
-        else:
-            # Single array format
-            class_shap_values = shap_values[0].squeeze()
+        # Get absolute values for ranking
+        abs_shap = np.abs(class_shap)
         
-        # Ensure it's a 1D array
-        class_shap_values = np.atleast_1d(class_shap_values).flatten()
+        # Get top-k indices (ensure we don't request more than available)
+        actual_top_k = min(top_k, len(abs_shap))
+        top_indices = np.argsort(abs_shap)[-actual_top_k:][::-1]
         
-        # Get absolute values for ranking importance
-        abs_shap_values = np.abs(class_shap_values)
-        
-        # Get top-k feature indices
-        top_indices = np.argsort(abs_shap_values)[-top_k:][::-1]
-        
-        # Create explanation dictionary
+        # Build top features list with safe indexing
         top_features = []
-        for idx in top_indices:
-            # Ensure idx is a scalar integer
-            idx = int(idx)
-            top_features.append({
-                'feature_name': self.feature_names[idx],
-                'feature_index': idx,
-                'shap_value': float(class_shap_values[idx]),
-                'abs_shap_value': float(abs_shap_values[idx])
-            })
+        for i, idx in enumerate(top_indices):
+            idx = int(idx)  # Ensure scalar
+            if idx < len(self.feature_names) and idx < len(class_shap):
+                top_features.append({
+                    'feature_name': self.feature_names[idx],
+                    'feature_index': idx,
+                    'shap_value': float(class_shap[idx]),
+                    'abs_shap_value': float(abs_shap[idx])
+                })
         
-        # Compute total absolute SHAP value (for anomaly scoring)
-        total_abs_shap = float(np.sum(abs_shap_values))
+        # Compute total absolute SHAP
+        total_abs_shap = float(np.sum(abs_shap))
         
         explanation = {
-            'predicted_class': int(predicted_class),
+            'predicted_class': predicted_class,
             'confidence': float(prediction[0][predicted_class]),
             'top_features': top_features,
             'total_abs_shap': total_abs_shap,
-            'shap_values_all': class_shap_values.tolist()
+            'shap_values_all': class_shap.tolist()
         }
         
         return explanation
@@ -143,44 +151,52 @@ class SHAPExplainer:
         Returns:
             dict: Feature importance summary
         """
-        # Limit samples for computational efficiency
         n_samples = min(len(samples), max_samples)
         sample_subset = samples[:n_samples]
         
         print(f"\nComputing feature importance summary for {n_samples} samples...")
         
-        # Compute SHAP values
-        shap_values = self.explainer.shap_values(sample_subset)
-        
-        # Average absolute SHAP values across all classes and samples
-        # shap_values is a list of arrays, one per class
-        all_abs_shap = []
-        for class_shap in shap_values:
-            # Shape: (samples, features, 1) -> squeeze last dim
-            class_shap_squeezed = class_shap.squeeze(axis=-1)
-            all_abs_shap.append(np.abs(class_shap_squeezed))
-        
-        # Stack and average
-        stacked_shap = np.stack(all_abs_shap, axis=0)  # (classes, samples, features)
-        mean_abs_shap = np.mean(stacked_shap, axis=(0, 1))  # Average over classes and samples
-        
-        # Rank features
-        feature_ranking = np.argsort(mean_abs_shap)[::-1]
-        
-        importance_summary = {
-            'feature_importance': [
-                {
-                    'rank': i + 1,
-                    'feature_name': self.feature_names[idx],
-                    'feature_index': int(idx),
-                    'mean_abs_shap': float(mean_abs_shap[idx])
-                }
-                for i, idx in enumerate(feature_ranking)
-            ]
-        }
-        
-        print("Feature importance summary complete")
-        return importance_summary
+        try:
+            # Compute SHAP values
+            shap_values = self.explainer.shap_values(sample_subset)
+            
+            # Average absolute SHAP values
+            if isinstance(shap_values, list):
+                all_abs_shap = []
+                for class_shap in shap_values:
+                    class_shap_squeezed = class_shap.squeeze(axis=-1)
+                    all_abs_shap.append(np.abs(class_shap_squeezed))
+                stacked_shap = np.stack(all_abs_shap, axis=0)
+                mean_abs_shap = np.mean(stacked_shap, axis=(0, 1))
+            else:
+                shap_squeezed = shap_values.squeeze(axis=-1)
+                mean_abs_shap = np.mean(np.abs(shap_squeezed), axis=0)
+            
+            # Ensure correct length
+            num_features = min(len(mean_abs_shap), len(self.feature_names))
+            mean_abs_shap = mean_abs_shap[:num_features]
+            
+            # Rank features
+            feature_ranking = np.argsort(mean_abs_shap)[::-1]
+            
+            importance_summary = {
+                'feature_importance': [
+                    {
+                        'rank': i + 1,
+                        'feature_name': self.feature_names[int(idx)],
+                        'feature_index': int(idx),
+                        'mean_abs_shap': float(mean_abs_shap[int(idx)])
+                    }
+                    for i, idx in enumerate(feature_ranking) if int(idx) < len(self.feature_names)
+                ]
+            }
+            
+            print("Feature importance summary complete")
+            return importance_summary
+            
+        except Exception as e:
+            print(f"Warning: Feature importance computation failed: {e}")
+            return {'feature_importance': []}
 
 
 def create_shap_explainer(model, background_data, feature_names):
